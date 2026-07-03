@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Визуализация цифровой модели рельефа с вычислением градусов склона</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+<base target="_blank">
+<link rel="stylesheet" type="text/css" href="./Qgis2threejs.css">
+<style type="text/css">
+#popup, #header, #layerpanel {
+  left: 36px;
+}
+
+/* ---------- Общая адаптивность ---------- */
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  -webkit-text-size-adjust: 100%;
+}
+#view {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+}
+#view canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  touch-action: none;
+}
+
+/* ---------- Компас ---------- */
+#compass {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  width: 72px;
+  height: 72px;
+  z-index: 900;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.45));
+}
+#compass svg {
+  width: 100%;
+  height: 100%;
+}
+#compass-needle {
+  transform-origin: 50% 50%;
+  transition: transform 0.12s linear;
+}
+
+/* ---------- Легенда ---------- */
+#legend {
+  position: fixed;
+  left: max(12px, env(safe-area-inset-left));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  z-index: 900;
+  max-width: 240px;
+  background: rgba(20, 22, 24, 0.85);
+  color: #f0f0f0;
+  border-radius: 8px;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 12px;
+  line-height: 1.35;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+  backdrop-filter: blur(3px);
+}
+#legend summary {
+  cursor: pointer;
+  padding: 8px 10px;
+  font-weight: bold;
+  font-size: 13px;
+  list-style: none;
+  user-select: none;
+}
+#legend summary::-webkit-details-marker { display: none; }
+#legend summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform 0.15s ease;
+}
+#legend[open] summary::before {
+  transform: rotate(90deg);
+}
+#legend-body {
+  padding: 0 10px 10px 10px;
+  max-height: 55vh;
+  overflow-y: auto;
+}
+.legend-title {
+  margin: 2px 0 6px 0;
+  font-weight: bold;
+}
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 1px 0;
+  white-space: nowrap;
+}
+.legend-swatch {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 12px;
+  border-radius: 2px;
+  border: 1px solid rgba(255,255,255,0.25);
+}
+.legend-line {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 0;
+  border-top: 2px dashed #ffffff;
+}
+.legend-sep {
+  margin: 8px 0 6px 0;
+  border-top: 1px solid rgba(255,255,255,0.2);
+  padding-top: 6px;
+}
+
+/* ---------- Мобильная адаптация ---------- */
+@media (max-width: 600px) {
+  #compass {
+    width: 56px;
+    height: 56px;
+  }
+  #legend {
+    max-width: 62vw;
+    font-size: 11px;
+  }
+  #legend summary {
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+  #legend-body {
+    max-height: 40vh;
+    padding: 0 8px 8px 8px;
+  }
+  .legend-swatch {
+    width: 14px;
+    height: 10px;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 420px) {
+  #legend-body {
+    max-height: 65vh;
+  }
+}
+</style>
+<script src="./threejs/three.min.js"></script>
+<script src="./threejs/OrbitControls.js"></script>
+<script src="./threejs/ViewHelper.js"></script>
+<script src="./Qgis2threejs.js"></script>
+</head>
+<body>
+<div id="view">
+  <div id="northarrow"></div>
+  <div id="navigation"></div>
+</div>
+
+<!-- compass -->
+<div id="compass" title="Направление на север">
+  <svg viewBox="0 0 100 100">
+    <circle cx="50" cy="50" r="47" fill="rgba(20,22,24,0.55)" stroke="rgba(255,255,255,0.6)" stroke-width="2"/>
+    <g id="compass-needle">
+      <polygon points="50,10 42,52 50,45 58,52" fill="#ff2400"/>
+      <polygon points="50,90 42,52 50,58 58,52" fill="#e6e6e6"/>
+    </g>
+    <text x="50" y="14" text-anchor="middle" font-size="12" font-weight="bold" fill="#ffffff">N</text>
+    <text x="50" y="94" text-anchor="middle" font-size="10" fill="#dddddd">S</text>
+    <text x="8" y="54" text-anchor="middle" font-size="10" fill="#dddddd">W</text>
+    <text x="92" y="54" text-anchor="middle" font-size="10" fill="#dddddd">E</text>
+  </svg>
+</div>
+
+<!-- slope legend -->
+<details id="legend" open>
+  <summary>Легенда</summary>
+  <div id="legend-body">
+    <div class="legend-title">Крутизна склона (°)</div>
+    <div class="legend-row"><span class="legend-swatch" style="background:#07ff5e"></span><span>0</span></div>
+    <div class="legend-row"><span class="legend-swatch" style="background:#00ff09"></span><span>4</span></div>
+    <div class="legend-row"><span class="legend-swatch" style="background:#54ff01"></span><span>5</span></div>
+    <div class="legend-row"><span class="legend-swatch" style="background:#e1ff01"></span><span>6</span></div>
+    <div class="legend-row"><span class="legend-swatch" style="background:#fff901"></span><span>7</span></div>
+    <div class="legend-row"><span class="legend-swatch" style="background:#ffdd01"></span><span>8</span></div>
+    <div class="legend-row"><span class="legend-swatch" style="background:#ffab00"></span><span>10</span></div>
+    <div class="legend-row"><span class="legend-swatch" style="background:#ff6005"></span><span>15</span></div>
+    <div class="legend-row"><span class="legend-swatch" style="background:#ff2400"></span><span>20</span></div>
+    <div class="legend-row"><span class="legend-swatch" style="background:#ff0700"></span><span>30</span></div>
+    <div class="legend-row"><span class="legend-swatch" style="background:#050100"></span><span>40</span></div>
+    <div class="legend-row"><span class="legend-swatch" style="background:#090200"></span><span>более 40</span></div>
+    <div class="legend-sep">
+      <div class="legend-row"><span class="legend-line"></span><span>Намский тракт</span></div>
+    </div>
+  </div>
+</details>
+
+<!-- popup -->
+<div id="popup">
+  <div id="closebtn">&times;</div>
+  <div id="popupbar"></div>
+  <div id="popupbody">
+    <div id="popupcontent"></div>
+
+    <!-- query result -->
+    <div id="queryresult">
+      <table id="qr_coords_table">
+        <caption>Clicked coordinates <div id="zoomtopoint" class="action-zoom zoombtn"></div></caption>
+        <tr><td id="qr_coords"></td></tr>
+      </table>
+
+      <table id="qr_layername_table">
+        <caption>Layer <div id="zoomtolayer" class="action-zoom zoombtn"></div></caption>
+        <tr><td id="qr_layername"></td></tr>
+      </table>
+
+      <table id="qr_attrs_table">
+        <caption>Attributes</caption>
+      </table>
+
+      <!-- camera actions and measure tool -->
+      <div id="orbitbtn" class="action-btn action-orbit">Orbit</div>
+      <div id="measurebtn" class="action-btn">Measure distance</div>
+    </div>
+
+    <!-- page info -->
+    <div id="pageinfo">
+      <h1>Current View URL</h1>
+      <div><input id="urlbox" type="text"></div>
+
+      <h1>Usage</h1>
+      <table id="usage">
+        <tr><td colspan="2" class="star">Mouse</td></tr>
+        <tr><td>Left button + Move</td><td>Orbit</td></tr>
+        <tr><td>Mouse Wheel</td><td>Zoom</td></tr>
+        <tr><td>Right button + Move</td><td>Pan</td></tr>
+
+        <tr><td colspan="2" class="star">Keys</td></tr>
+        <tr><td>Arrow keys</td><td>Move Horizontally</td></tr>
+        <tr><td>Shift + Arrow keys</td><td>Orbit</td></tr>
+        <tr><td>Ctrl + Arrow keys</td><td>Rotate</td></tr>
+        <tr><td>Shift + Ctrl + Up / Down</td><td>Zoom In / Out</td></tr>
+        <tr><td>L</td><td>Toggle Label Visibility</td></tr>
+        <tr><td>R</td><td>Start / Stop Orbit Animation</td></tr>
+        <tr><td>W</td><td>Wireframe Mode</td></tr>
+        <tr><td>Shift + R</td><td>Reset Camera Position</td></tr>
+        <tr><td>Shift + S</td><td>Save Image</td></tr>
+      </table>
+
+      <h1>About</h1>
+      <div id="about"><img src="./Qgis2threejs.png">
+        This page was made with <a href="https://www.qgis.org/">QGIS</a> and <a href="https://github.com/minorua/Qgis2threejs">Qgis2threejs</a> plugin (version 2.10.2).
+        <div>Powered by <a href="https://threejs.org/">three.js</a>
+        <span id="lib_proj4js"> and <a href="https://trac.osgeo.org/proj4js/">Proj4js</a></span>.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- progress bar -->
+<div id="progress"><div id="progressbar"></div></div>
+
+<!-- menu -->
+<div id="toolbtns">
+  <div id="layerbtn"></div>
+  <div id="animbtn" class="hidden"></div>
+  <div id="infobtn"></div>
+</div>
+
+<!-- header and footer -->
+<div id="header"></div>
+<div id="footer"></div>
+
+<!-- layer panel -->
+<div id="layerpanel">
+  <div id="layerlist"></div>
+</div>
+
+<!-- animation -->
+<div id="narrativebox" class="ef1">
+  <div id="narbody">
+
+  </div>
+  <div id="nextbtn"></div>
+</div>
+
+<script>
+
+
+var container = document.getElementById("view"),
+    app = Q3D.application,
+    gui = Q3D.gui;
+
+app.init(container);       // initialize viewer
+
+// load the scene
+app.loadSceneFile("./data/index/scene.json", function (scene) {
+  // scene file has been loaded
+  app.start();
+}, function (scene) {
+  // all associated files have been loaded
+
+});
+
+// keep the compass needle pointing to true north as the camera orbits
+(function () {
+  var needle = document.getElementById("compass-needle");
+  if (!needle) return;
+
+  function updateCompass() {
+    try {
+      var camera = app.camera;
+      if (camera) {
+        var dir = camera.getWorldDirection ? camera.getWorldDirection(new THREE.Vector3()) : null;
+        if (dir) {
+          // Qgis2threejs uses Z as the up axis, so north (screen "up")
+          // corresponds to the camera's X/Y facing direction.
+          var angleRad = Math.atan2(dir.x, dir.y);
+          var angleDeg = angleRad * 180 / Math.PI;
+          needle.style.transform = "rotate(" + angleDeg + "deg)";
+        }
+      }
+    } catch (e) {
+      // Fails silently if the internal API differs; compass stays static.
+    }
+    requestAnimationFrame(updateCompass);
+  }
+  requestAnimationFrame(updateCompass);
+})();
+</script>
+</body>
+</html>
